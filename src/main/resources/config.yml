@@ -1,11 +1,9 @@
 grapler:
-  range: 10.0            # maksymalny zasieg w kratkach
+  range: 10.0            # na jakiej odleglosci haczyk odpala przyciaganie (kratki)
   cooldown-seconds: 60   # cooldown 1 minuta
-  # SELF  = przyciaga Ciebie do miejsca trafienia haczykiem
-  # ENEMY = przyciaga trafionego moba/gracza do Ciebie
-  # BOTH  = blok -> przyciaga Ciebie, mob/gracz -> przyciaga jego do Ciebie
-  mode: BOTH
-  max-speed: 2.2
+  air-ticks: 12          # po tylu tickach lotu haczyk odpala sam (20 ticks = 1 s), nawet jak nic nie trafi
+  power: 1.0             # sila wyrzutu: wieksza = dalej poleci za hakiem, mniejsza = krotszy lot
+  max-speed: 2.4         # limit predkosci lotu
   no-fall-damage: true   # brak obrazen od upadku po uzyciu (6 s)
 
 brata:

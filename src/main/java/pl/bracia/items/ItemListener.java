@@ -17,6 +17,7 @@ import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
 import java.util.HashMap;
@@ -32,6 +33,8 @@ public final class ItemListener implements Listener {
     private final Map<String, Long> cooldowns = new HashMap<>();
     /** gracze, ktorzy nie dostaja obrazen od upadku po grapler (ms) */
     private final Map<UUID, Long> noFall = new HashMap<>();
+    /** haczyki Graplera, ktore jeszcze nie odpalily: uuid haczyka -> uuid gracza */
+    private final Map<UUID, UUID> activeHooks = new HashMap<>();
 
     public ItemListener(BraciaItems plugin, Items items) {
         this.plugin = plugin;
@@ -64,7 +67,7 @@ public final class ItemListener implements Listener {
                 || Items.GRAPLER.equals(items.idOf(p.getInventory().getItemInOffHand()));
     }
 
-    /** Rzut wedka: blokujemy na cooldownie, w przeciwnym razie oznaczamy haczyk. */
+    /** Rzut wedka: blokujemy na cooldownie, w przeciwnym razie obserwujemy haczyk. */
     @EventHandler
     public void onCast(PlayerFishEvent e) {
         if (e.getState() != PlayerFishEvent.State.FISHING) {
@@ -81,7 +84,41 @@ public final class ItemListener implements Listener {
             cooldownMessage(p, "Grapler", left);
             return;
         }
-        items.tag(e.getHook(), Items.GRAPLER);
+
+        FishHook hook = e.getHook();
+        items.tag(hook, Items.GRAPLER);
+        activeHooks.put(hook.getUniqueId(), p.getUniqueId());
+        watch(p, hook);
+    }
+
+    /** Co tick sprawdza haczyk: odpala, gdy doleci na zasieg albo minie czas lotu. */
+    private void watch(Player p, FishHook hook) {
+        FileConfiguration cfg = plugin.getConfig();
+        double range = cfg.getDouble("grapler.range", 10.0);
+        int airTicks = cfg.getInt("grapler.air-ticks", 12);
+
+        new BukkitRunnable() {
+            int ticks = 0;
+
+            @Override
+            public void run() {
+                ticks++;
+                if (!activeHooks.containsKey(hook.getUniqueId())) {
+                    cancel(); // juz odpalil (trafil w cos)
+                    return;
+                }
+                if (!hook.isValid() || !p.isOnline() || hook.getWorld() != p.getWorld()) {
+                    activeHooks.remove(hook.getUniqueId());
+                    cancel();
+                    return;
+                }
+                double dist = hook.getLocation().distance(p.getLocation());
+                if (dist >= range || ticks >= airTicks) {
+                    fire(p, hook, hook.getLocation());
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
     }
 
     /** Haczyk trafil w blok lub moba. */
@@ -90,76 +127,57 @@ public final class ItemListener implements Listener {
         if (!(e.getEntity() instanceof FishHook hook)) {
             return;
         }
-        if (!Items.GRAPLER.equals(items.entityId(hook))) {
+        UUID ownerId = activeHooks.get(hook.getUniqueId());
+        if (ownerId == null) {
             return;
         }
-        if (!(hook.getShooter() instanceof Player p)) {
+        Player p = plugin.getServer().getPlayer(ownerId);
+        if (p == null) {
+            activeHooks.remove(hook.getUniqueId());
             return;
         }
-
-        FileConfiguration cfg = plugin.getConfig();
-        double range = cfg.getDouble("grapler.range", 10.0);
-        int cooldown = cfg.getInt("grapler.cooldown-seconds", 60);
-        String mode = cfg.getString("grapler.mode", "BOTH").toUpperCase();
-
         Entity hitEntity = e.getHitEntity();
-        Location impact = hitEntity != null ? hitEntity.getLocation() : hook.getLocation();
-        Location from = p.getLocation();
-
-        if (from.getWorld() != impact.getWorld()) {
-            return;
-        }
-        if (remainingMs(p, Items.GRAPLER) > 0) {
-            return;
-        }
-
-        double dist = from.distance(impact);
-        if (dist > range) {
-            p.sendActionBar(Component.text("Za daleko! Zasieg: " + (int) range + " kratek", NamedTextColor.RED));
-            plugin.getServer().getScheduler().runTask(plugin, hook::remove);
-            return;
-        }
-
-        boolean hitLiving = hitEntity instanceof LivingEntity;
-        if (hitEntity != null && !hitLiving) {
-            return; // przedmioty, lodki itp. ignorujemy
-        }
-
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
-            if (hitLiving) {
-                if (mode.equals("SELF")) {
-                    pull(p, impact);
-                } else {
-                    pull(hitEntity, p.getLocation());
-                }
-            } else {
-                if (mode.equals("ENEMY")) {
-                    hook.remove();
-                    return;
-                }
-                pull(p, impact);
-            }
-
-            if (cfg.getBoolean("grapler.no-fall-damage", true)) {
-                noFall.put(p.getUniqueId(), System.currentTimeMillis() + 6000L);
-            }
-            hook.remove();
-        });
-
-        startCooldown(p, Items.GRAPLER, cooldown);
+        Location target = hitEntity != null ? hitEntity.getLocation() : hook.getLocation();
+        fire(p, hook, target);
     }
 
-    private void pull(Entity entity, Location to) {
-        Vector v = to.toVector().subtract(entity.getLocation().toVector());
-        double dist = v.length();
-        if (dist < 0.5) {
+    /** Odpala wyrzut dokladnie raz na haczyk. */
+    private void fire(Player p, FishHook hook, Location target) {
+        if (activeHooks.remove(hook.getUniqueId()) == null) {
             return;
         }
-        double max = plugin.getConfig().getDouble("grapler.max-speed", 2.2);
-        double speed = Math.min(max, 0.5 + dist * 0.14);
-        v.normalize().multiply(speed);
-        v.setY(Math.max(v.getY(), 0.0) + 0.35);
-        entity.setVelocity(v);
+        FileConfiguration cfg = plugin.getConfig();
+        startCooldown(p, Items.GRAPLER, cfg.getInt("grapler.cooldown-seconds", 60));
+        if (cfg.getBoolean("grapler.no-fall-damage", true)) {
+            noFall.put(p.getUniqueId(), System.currentTimeMillis() + 6000L);
+        }
+
+        Location t = target.clone();
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            launch(p, t);
+            hook.remove();
+        });
+    }
+
+    /** Wyrzuca gracza w strone haka. Rozped sprawia, ze leci troche dalej niz hak. */
+    private void launch(Player p, Location target) {
+        if (!p.isOnline() || p.getWorld() != target.getWorld()) {
+            return;
+        }
+        FileConfiguration cfg = plugin.getConfig();
+        double power = cfg.getDouble("grapler.power", 1.0);
+        double max = cfg.getDouble("grapler.max-speed", 2.4);
+
+        Vector dir = target.toVector().subtract(p.getEyeLocation().toVector());
+        double dist = dir.length();
+        if (dist < 0.5) {
+            dir = p.getLocation().getDirection();
+            dist = 1.0;
+        }
+        double speed = Math.min(max, (0.7 + dist * 0.12) * power);
+        dir.normalize().multiply(speed);
+        dir.setY(dir.getY() + 0.25);
+        p.setVelocity(dir);
     }
 
     @EventHandler
