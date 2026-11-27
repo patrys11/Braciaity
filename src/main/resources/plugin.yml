@@ -1,0 +1,15 @@
+name: BraciaItems
+version: 1.0.0
+main: pl.bracia.items.BraciaItems
+api-version: '1.21'
+description: Grapler (wedka) i Miecz Brata
+commands:
+  braciaitems:
+    description: Komendy BraciaItems
+    usage: /braciaitems give <grapler|brata> [gracz] | reload
+    aliases: [bitems]
+    permission: braciaitems.admin
+permissions:
+  braciaitems.admin:
+    description: Dawanie itemow i reload
+    default: op

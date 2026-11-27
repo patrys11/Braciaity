@@ -1,0 +1,16 @@
+grapler:
+  range: 10.0            # maksymalny zasieg w kratkach
+  cooldown-seconds: 60   # cooldown 1 minuta
+  # SELF  = przyciaga Ciebie do miejsca trafienia haczykiem
+  # ENEMY = przyciaga trafionego moba/gracza do Ciebie
+  # BOTH  = blok -> przyciaga Ciebie, mob/gracz -> przyciaga jego do Ciebie
+  mode: BOTH
+  max-speed: 2.2
+  no-fall-damage: true   # brak obrazen od upadku po uzyciu (6 s)
+
+brata:
+  material: NETHERITE_SWORD
+  cooldown-seconds: 120  # cooldown 2 minuty
+  glowing-seconds: 30
+  poison-seconds: 10
+  poison-level: 2        # Poison II
